@@ -5,6 +5,7 @@ export interface AccessTokenPayload {
   email: string;
   role: Role;
   organizationId: string;
+  jti: string;
 }
 
 export interface RefreshTokenPayload {

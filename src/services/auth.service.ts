@@ -66,6 +66,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       organizationId: user.organizationId,
+      jti: randomUUID(),
     });
 
     const refreshToken = await this.issueRefreshToken(user.id);
@@ -109,6 +110,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       organizationId: user.organizationId,
+      jti : randomUUID(),
     });
 
     const newRefreshToken = await this.issueRefreshToken(user.id);
