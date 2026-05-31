@@ -4,12 +4,18 @@ import { AppError } from '../errors/AppError';
 import { projectRepository } from '../repositories/project.repository';
 import { taskRepository } from '../repositories/task.repository';
 import { userRepository } from '../repositories/user.repository';
+import { cacheService } from '../services/cache.service';
 import { AuthenticatedUser } from '../types/express';
 import {
   DeleteTaskResponse,
   PaginatedTasksResponse,
   TaskResponse,
 } from '../types/task.types';
+import {
+  buildTaskListCacheKey,
+  invalidateTaskListCache,
+  TASK_LIST_CACHE_TTL,
+} from '../utils/taskListCache.util';
 import {
   CreateTaskInput,
   ListTaskQuery,
@@ -46,12 +52,28 @@ export class TaskService {
       dueDate: input.dueDate ?? null,
     });
 
+    await invalidateTaskListCache(user.organizationId);
+
     return this.toTaskResponse(task);
   }
 
   async list(user: AuthenticatedUser, query: ListTaskQuery): Promise<PaginatedTasksResponse> {
     const assigneeId =
       user.role === Role.MEMBER ? user.userId : query.assigneeId;
+
+    const cacheKey = buildTaskListCacheKey({
+      organizationId: user.organizationId,
+      assigneeId,
+      status: query.status,
+      priority: query.priority,
+      page: query.page,
+      limit: query.limit,
+    });
+
+    const cached = await cacheService.get<PaginatedTasksResponse>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
     const { tasks, total } = await taskRepository.findManyPaginated({
       organizationId: user.organizationId,
@@ -64,7 +86,7 @@ export class TaskService {
 
     const totalPages = total === 0 ? 0 : Math.ceil(total / query.limit);
 
-    return {
+    const response: PaginatedTasksResponse = {
       data: tasks.map((task) => this.toTaskResponse(task)),
       meta: {
         page: query.page,
@@ -73,6 +95,10 @@ export class TaskService {
         totalPages,
       },
     };
+
+    await cacheService.set(cacheKey, response, TASK_LIST_CACHE_TTL);
+
+    return response;
   }
 
   async getById(user: AuthenticatedUser, id: string): Promise<TaskResponse> {
@@ -107,6 +133,8 @@ export class TaskService {
       ...(input.dueDate !== undefined && { dueDate: input.dueDate }),
     });
 
+    await invalidateTaskListCache(user.organizationId);
+
     return this.toTaskResponse(task);
   }
 
@@ -128,12 +156,15 @@ export class TaskService {
       input.status
     );
 
+    await invalidateTaskListCache(user.organizationId);
+
     return this.toTaskResponse(task);
   }
 
   async delete(user: AuthenticatedUser, id: string): Promise<DeleteTaskResponse> {
     await this.findTaskOrThrow(id, user.organizationId);
     await taskRepository.deleteTask(id, user.organizationId);
+    await invalidateTaskListCache(user.organizationId);
     return { message: 'Task deleted successfully' };
   }
 
